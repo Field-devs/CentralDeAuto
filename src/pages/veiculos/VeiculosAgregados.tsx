@@ -20,7 +20,7 @@ interface VeiculoWithMotorista extends Veiculo {
 }
 
 const VeiculosAgregados = () => {
-  const { query, companyId } = useCompanyData();
+  const { companyId } = useCompanyData();
   const [veiculos, setVeiculos] = useState<VeiculoWithMotorista[]>([]);
   const [motoristas, setMotoristas] = useState<Motorista[]>([]);
   const [loading, setLoading] = useState(true);
@@ -89,66 +89,7 @@ const VeiculosAgregados = () => {
       const from = (currentPage - 1) * pageSize;
       const to = from + pageSize - 1;
       
-      let countQuery = supabase
-        .from('motorista')
-        .select('motorista_id', { count: 'exact', head: true })
-        .eq('company_id', companyId)
-        .eq('st_cadastro', 'contratado');
-      
-      const { count: motoristaCount, error: motoristaCountError } = await countQuery;
-
-      if (motoristaCountError) {
-        throw new Error(`Erro ao buscar motoristas: ${motoristaCountError.message}`);
-      }
-
-      if (!motoristaCount || motoristaCount === 0) {
-        setVeiculos([]);
-        setTotalCount(0);
-        setTotalPages(1);
-        return;
-      }
-
-      const { data: motoristasData, error: motoristasError } = await supabase
-        .from('motorista')
-        .select('motorista_id')
-        .eq('company_id', companyId)
-        .eq('st_cadastro', 'contratado');
-
-      if (motoristasError) {
-        throw new Error(`Erro ao buscar motoristas: ${motoristasError.message}`);
-      }
-
-      if (!motoristasData || motoristasData.length === 0) {
-        setVeiculos([]);
-        setTotalCount(0);
-        setTotalPages(1);
-        return;
-      }
-
-      const motoristaIds = motoristasData.map(m => m.motorista_id);
-
-      let vehicleCountQuery = supabase
-        .from('veiculo')
-        .select('veiculo_id', { count: 'exact', head: true })
-        .eq('status_veiculo', true)
-        .in('motorista_id', motoristaIds);
-      
-      if (searchTerm) {
-        vehicleCountQuery = vehicleCountQuery.or(
-          `placa.ilike.%${searchTerm}%,marca.ilike.%${searchTerm}%,tipo.ilike.%${searchTerm}%,motorista.nome.ilike.%${searchTerm}%,motorista.cpf.ilike.%${searchTerm}%`
-        );
-      }
-      
-      const { count: vehicleCount, error: vehicleCountError } = await vehicleCountQuery;
-      
-      if (vehicleCountError) {
-        throw new Error(`Erro ao contar veículos: ${vehicleCountError.message}`);
-      }
-      
-      setTotalCount(vehicleCount || 0);
-      setTotalPages(Math.max(1, Math.ceil((vehicleCount || 0) / pageSize)));
-
-      let dataQuery = supabase
+      let query = supabase
         .from('veiculo')
         .select(`
           *,
@@ -162,21 +103,19 @@ const VeiculosAgregados = () => {
             documento_motorista (*)
           ),
           documento_veiculo (*)
-        `)
+        `, { count: 'exact' })
         .eq('status_veiculo', true)
-        .in('motorista_id', motoristaIds);
-      
+        .eq('motorista.st_cadastro', 'contratado')
+        .eq('motorista.company_id', companyId);
+
+      // Only add search filter if searchTerm exists
       if (searchTerm) {
-        dataQuery = dataQuery.or(
-          `placa.ilike.%${searchTerm}%,marca.ilike.%${searchTerm}%,tipo.ilike.%${searchTerm}%`
-        );
+        query = query.or(`placa.ilike.%${searchTerm}%,marca.ilike.%${searchTerm}%,tipo.ilike.%${searchTerm}%`);
       }
-      
-      dataQuery = dataQuery
+
+      const { data: veiculosData, count, error: veiculosError } = await query
         .order('placa', { ascending: true })
         .range(from, to);
-      
-      const { data: veiculosData, error: veiculosError } = await dataQuery;
 
       if (veiculosError) {
         throw new Error(`Erro ao buscar veículos: ${veiculosError.message}`);
@@ -184,18 +123,22 @@ const VeiculosAgregados = () => {
 
       if (!veiculosData) {
         setVeiculos([]);
+        setTotalCount(0);
+        setTotalPages(1);
         return;
       }
 
-      const veiculosContratados = veiculosData
-        .filter(veiculo => veiculo.motorista?.st_cadastro === 'contratado')
+      // Process the vehicles data
+      const processedVeiculos = veiculosData
         .map(veiculo => ({
           ...veiculo,
           placa: veiculo.placa?.toUpperCase() || ''
         }))
         .sort((a, b) => (a.placa || '').localeCompare(b.placa || ''));
 
-      setVeiculos(veiculosContratados);
+      setVeiculos(processedVeiculos);
+      setTotalCount(count || 0);
+      setTotalPages(Math.max(1, Math.ceil((count || 0) / pageSize)));
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido ao carregar veículos';
       console.error('Error fetching veiculos:', errorMessage);
@@ -210,10 +153,12 @@ const VeiculosAgregados = () => {
   const fetchMotoristas = async () => {
     try {
       setError(null);
-      const { data: motoristasData, error: motoristasError } = await query('motorista')
+      const { data: motoristasData, error: motoristasError } = await supabase
+        .from('motorista')
         .select('*')
         .eq('funcao', 'Agregado')
-        .eq('st_cadastro', 'contratado');
+        .eq('st_cadastro', 'contratado')
+        .eq('company_id', companyId);
 
       if (motoristasError) {
         throw new Error(`Erro ao buscar motoristas: ${motoristasError.message}`);
@@ -237,7 +182,8 @@ const VeiculosAgregados = () => {
   const confirmDelete = async () => {
     if (!selectedVeiculo) return;
     try {
-      const { error } = await query('veiculo')
+      const { error } = await supabase
+        .from('veiculo')
         .update({ status_veiculo: false })
         .eq('veiculo_id', selectedVeiculo.veiculo_id);
 
@@ -291,7 +237,8 @@ const VeiculosAgregados = () => {
   const handleBulkDelete = async () => {
     try {
       for (const id of selectedItems) {
-        const { error } = await query('veiculo')
+        const { error } = await supabase
+          .from('veiculo')
           .update({ status_veiculo: false })
           .eq('veiculo_id', id);
 
@@ -619,6 +566,7 @@ const VeiculosAgregados = () => {
         )}
       </div>
 
+      {/* Context Menu */}
       {contextMenu.visible && contextMenu.veiculo && (
         <ContextMenu
           x={contextMenu.x}

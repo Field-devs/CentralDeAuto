@@ -23,7 +23,7 @@ import { useFloatingChat } from '../../hooks/useFloatingChat';
 import BulkActionsModal from '../../components/BulkActionsModal';
 import AgregadoDetailView from '../../components/AgregadoDetailView';
 
-interface MotoristaWithAddress extends Motorista {
+interface MotoristaWithDetails extends Motorista {
   cidade?: string;
   cidadeLowerCase?: string;
   estado?: string;
@@ -31,11 +31,10 @@ interface MotoristaWithAddress extends Motorista {
 }
 
 const AgregadosLista = () => {
-  const { query } = useCompanyData();
-  const { companyId } = useAuth();
+  const { query, companyId } = useCompanyData();
   const { startChat } = useFloatingChat();
-  const [motoristas, setMotoristas] = useState<MotoristaWithAddress[]>([]);
-  const [allMotoristas, setAllMotoristas] = useState<MotoristaWithAddress[]>([]);
+  const [motoristas, setMotoristas] = useState<MotoristaWithDetails[]>([]);
+  const [allMotoristas, setAllMotoristas] = useState<MotoristaWithDetails[]>([]);
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -66,6 +65,7 @@ const AgregadosLista = () => {
   const [totalPages, setTotalPages] = useState(1);
   
   const [selectedDocumento, setSelectedDocumento] = useState<{
+    agregado?: Motorista | null;
     documento: DocumentoMotorista | null;
     nome: string;
     cpf?: string;
@@ -73,8 +73,7 @@ const AgregadosLista = () => {
     telefone?: string;
     dt_nascimento?: string;
     endereco: any;
-    veiculo: any | null;
-    agregado?: Motorista | null;
+    veiculo: (Veiculo & { documento_veiculo: any[] }) | null;
     st_cadastro?: string;
   }>({ documento: null, nome: '', endereco: null, veiculo: null });
   
@@ -93,10 +92,13 @@ const AgregadosLista = () => {
   });
 
   useEffect(() => {
-    fetchMotoristas();
     fetchClientes();
     fetchCities();
     fetchWiseappAccountId();
+  }, []);
+
+  useEffect(() => {
+    fetchMotoristas();
   }, [currentPage, pageSize, dateRange]);
 
   useEffect(() => {
@@ -142,9 +144,8 @@ const AgregadosLista = () => {
       const from = (currentPage - 1) * pageSize;
       const to = from + pageSize - 1;
       
-      // First, get the total count with filters but without pagination
-      let countQuery = supabase
-        .from('motorista')
+      // Build the base query for counting
+      let countQuery = query('motorista')
         .select('motorista_id', { count: 'exact', head: true })
         .eq('funcao', 'Agregado');
       
@@ -154,7 +155,7 @@ const AgregadosLista = () => {
       }
       
       if (phoneSearch) {
-        countQuery = countQuery.ilike('telefone', `%${phoneSearch}%`);
+        countQuery = countQuery.filter('telefone', 'ilike', `%${phoneSearch}%`);
       }
       
       if (selectedStatus) {
@@ -173,9 +174,8 @@ const AgregadosLista = () => {
       setTotalCount(count || 0);
       setTotalPages(Math.max(1, Math.ceil((count || 0) / pageSize)));
       
-      // Then fetch the paginated data with all needed relations
-      let dataQuery = supabase
-        .from('motorista')
+      // Build the base query for data
+      let dataQuery = query('motorista')
         .select(`
           *,
           end_motorista (
@@ -201,7 +201,7 @@ const AgregadosLista = () => {
       }
       
       if (phoneSearch) {
-        dataQuery = dataQuery.ilike('telefone', `%${phoneSearch}%`);
+        dataQuery = dataQuery.filter('telefone', 'ilike', `%${phoneSearch}%`);
       }
       
       if (selectedStatus) {
@@ -250,13 +250,12 @@ const AgregadosLista = () => {
       setMotoristas(filteredMotoristas);
       
       // Fetch all motoristas for select all functionality
-      const { data: allData } = await supabase
-        .from('motorista')
+      const { data: allData } = await query('motorista')
         .select('motorista_id')
         .eq('funcao', 'Agregado');
         
       if (allData) {
-        setAllMotoristas(allData as MotoristaWithAddress[]);
+        setAllMotoristas(allData as MotoristaWithDetails[]);
       }
     } catch (error) {
       console.error('Error fetching motoristas:', error);
@@ -270,10 +269,10 @@ const AgregadosLista = () => {
 
   const fetchClientes = async () => {
     try {
-      const { data, error } = await query('cliente')
-        .select('*')
-        .eq('st_cliente', true)
-        .order('nome');
+      let queryBuilder = supabase.from('cliente').select('*');
+      queryBuilder = queryBuilder.eq('st_cliente', true);
+      
+      const { data, error } = await queryBuilder.order('nome');
 
       if (error) throw error;
       setClientes(data || []);
@@ -327,43 +326,6 @@ const AgregadosLista = () => {
     } else {
       toast.error('Este motorista não possui telefone cadastrado');
     }
-  };
-
-  const renderPhoneLink = (motorista: Motorista) => {
-    const phoneNumber = motorista.telefone ? formatPhone(motorista.telefone.toString()) : '-';
-
-    // If no conversation_id, just show the phone number without the "Sem conversa" text
-    if (!motorista.conversation_id) {
-      return (
-        <div className="text-sm text-gray-900 dark:text-white">
-          {phoneNumber}
-        </div>
-      );
-    }
-
-    if (!wiseappAccountId) {
-      return (
-        <div className="text-sm text-gray-900 dark:text-white">
-          {phoneNumber}
-          <span className="ml-1 text-xs text-red-500" title="WiseApp Account ID não disponível">
-            (Conta WiseApp não configurada)
-          </span>
-        </div>
-      );
-    }
-
-    const wiseappUrl = `https://chat.wiseapp360.com/app/accounts/${wiseappAccountId}/conversations/${motorista.conversation_id}`;
-
-    return (
-      <a 
-        href={wiseappUrl} 
-        target="_blank" 
-        rel="noopener noreferrer" 
-        className="text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 hover:underline"
-      >
-        {phoneNumber}
-      </a>
-    );
   };
 
   const handleViewAgregadoDetail = async (motorista: Motorista) => {
@@ -496,7 +458,6 @@ const AgregadosLista = () => {
               cidade (
                 cidade,
                 estado (
-                  estado,
                   sigla_estado
                 )
               )
@@ -510,6 +471,21 @@ const AgregadosLista = () => {
         throw enderecoError;
       }
 
+      // Fetch veiculo
+      const { data: veiculoData, error: veiculoError } = await supabase
+        .from('veiculo')
+        .select(`
+          *,
+          documento_veiculo (*)
+        `)
+        .eq('motorista_id', motorista.motorista_id)
+        .eq('status_veiculo', true)
+        .maybeSingle();
+
+      if (veiculoError && veiculoError.code !== 'PGRST116') {
+        throw veiculoError;
+      }
+
       setSelectedDocumento({
         documento: documentoData || null,
         nome: motorista.nome,
@@ -518,7 +494,7 @@ const AgregadosLista = () => {
         telefone: motorista.telefone?.toString(),
         dt_nascimento: motorista.dt_nascimento,
         endereco: enderecoData || null,
-        veiculo: null,
+        veiculo: veiculoData || null,
         st_cadastro: motorista.st_cadastro
       });
     } catch (error) {
@@ -756,108 +732,103 @@ const AgregadosLista = () => {
               </button>
             </>
           )}
+          <button
+            onClick={() => setIsAddModalOpen(true)}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 
+                     focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 
+                     transition-colors flex items-center gap-2"
+          >
+            <Plus className="w-5 h-5" />
+            Adicionar Agregado
+          </button>
         </div>
       </div>
 
       <div className="bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
-        <div className="flex flex-col md:flex-row gap-4">
-          <div className="flex-1 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="relative">
-              <input
-                type="text"
-                placeholder="Buscar por nome ou CPF..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    handleSearch();
-                  }
-                }}
-                className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-800 border border-gray-200 
-                         dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-blue-500 
-                         focus:border-blue-500 text-gray-900 dark:text-gray-100"
-              />
-              <Search 
-                className="absolute left-3 top-2.5 h-5 w-5 text-gray-400 cursor-pointer" 
-                onClick={handleSearch}
-              />
-            </div>
-
-            <div className="relative">
-              <input
-                type="text"
-                placeholder="Buscar por telefone..."
-                value={phoneSearch}
-                onChange={(e) => setPhoneSearch(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    handleSearch();
-                  }
-                }}
-                className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-800 border border-gray-200 
-                         dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-blue-500 
-                         focus:border-blue-500 text-gray-900 dark:text-gray-100"
-              />
-              <Phone 
-                className="absolute left-3 top-2.5 h-5 w-5 text-gray-400 cursor-pointer" 
-                onClick={handleSearch}
-              />
-            </div>
-
-            <div className="relative">
-              <select
-                value={selectedStatus}
-                onChange={(e) => {
-                  setSelectedStatus(e.target.value);
-                  setCurrentPage(1); // Reset to first page on filter change
+        <div className="flex flex-col md:flex-row gap-4 w-full">
+          <div className="relative flex-1">
+            <input
+              type="text"
+              placeholder="Buscar por nome ou CPF..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
                   handleSearch();
-                }}
-                className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-800 border border-gray-200 
-                         dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-blue-500 
-                         focus:border-blue-500 text-gray-900 dark:text-gray-100 appearance-none"
-              >
-                {statusOptions.map(option => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-              <Filter className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" />
-            </div>
-
-            <div className="relative">
-              <select
-                value={selectedCity}
-                onChange={(e) => {
-                  setSelectedCity(e.target.value);
-                  setCurrentPage(1); // Reset to first page on filter change
-                  handleSearch();
-                }}
-                className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-800 border border-gray-200 
-                         dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-blue-500 
-                         focus:border-blue-500 text-gray-900 dark:text-gray-100 appearance-none"
-              >
-                <option value="">Todas as cidades</option>
-                {cities.map((city, index) => (
-                  <option key={index} value={city.cidadeLowerCase}>
-                    {city.cidade} ({city.estado.sigla_estado})
-                  </option>
-                ))}
-              </select>
-              <MapPin className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" />
-            </div>
+                }
+              }}
+              className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-800 border border-gray-200 
+                       dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-blue-500 
+                       focus:border-blue-500 text-gray-900 dark:text-gray-100"
+            />
+            <Search 
+              className="absolute left-3 top-2.5 h-5 w-5 text-gray-400 cursor-pointer" 
+              onClick={handleSearch}
+            />
           </div>
 
-          <div className="flex gap-2">
-            <button
-              onClick={() => setIsAddModalOpen(true)}
-              className="h-[42px] w-[42px] bg-blue-600 text-white rounded-lg hover:bg-blue-700 
-                       focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 
-                       transition-colors flex items-center justify-center"
-              title="Adicionar Agregado"
+          <div className="relative flex-1">
+            <input
+              type="text"
+              placeholder="Buscar por telefone..."
+              value={phoneSearch}
+              onChange={(e) => setPhoneSearch(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  handleSearch();
+                }
+              }}
+              className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-800 border border-gray-200 
+                       dark:border-gray-700  rounded-lg focus:ring-2 focus:ring-blue-500 
+                       focus:border-blue-500 text-gray-900 dark:text-gray-100"
+            />
+            <Phone 
+              className="absolute left-3 top-2.5 h-5 w-5 text-gray-400 cursor-pointer" 
+              onClick={handleSearch}
+            />
+          </div>
+
+          <div className="relative flex-1">
+            <select
+              value={selectedStatus}
+              onChange={(e) => {
+                setSelectedStatus(e.target.value);
+                setCurrentPage(1); // Reset to first page on filter change
+                handleSearch();
+              }}
+              className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-800 border border-gray-200 
+                       dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-blue-500 
+                       focus:border-blue-500 text-gray-900 dark:text-gray-100 appearance-none"
             >
-              <Plus className="w-5 h-5" />
-            </button>
+              {statusOptions.map(option => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <Filter className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" />
+          </div>
+
+          <div className="relative flex-1">
+            <select
+              value={selectedCity}
+              onChange={(e) => {
+                setSelectedCity(e.target.value);
+                setCurrentPage(1); // Reset to first page on filter change
+                handleSearch();
+              }}
+              className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-800 border border-gray-200 
+                       dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-blue-500 
+                       focus:border-blue-500 text-gray-900 dark:text-gray-100 appearance-none"
+            >
+              <option value="">Todas as cidades</option>
+              {cities.map((city, index) => (
+                <option key={index} value={city.cidadeLowerCase}>
+                  {city.cidade} ({city.estado.sigla_estado})
+                </option>
+              ))}
+            </select>
+            <MapPin className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" />
           </div>
         </div>
 
@@ -875,7 +846,7 @@ const AgregadosLista = () => {
         </div>
       </div>
 
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden relative">
+      <div className="overflow-x-auto bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 relative">
         <div className="overflow-hidden">
           <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center">
             <div className="flex items-center">
@@ -906,10 +877,10 @@ const AgregadosLista = () => {
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider bg-gray-50 dark:bg-gray-800">Nome</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider bg-gray-50 dark:bg-gray-800">CPF</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider bg-gray-50 dark:bg-gray-800">Veículo</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider bg-gray-50 dark:bg-gray-800">Cidade</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider bg-gray-50 dark:bg-gray-800">Status</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider bg-gray-50 dark:bg-gray-800">Cliente</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider bg-gray-50 dark:bg-gray-800">Veículo</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider bg-gray-50 dark:bg-gray-800">Contato</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider bg-gray-50 dark:bg-gray-800">Cadastro</th>
                     <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider bg-gray-50 dark:bg-gray-800">Ações</th>
@@ -943,28 +914,14 @@ const AgregadosLista = () => {
                             <div className="text-sm font-medium text-gray-900 dark:text-white">
                               {motorista.nome}
                             </div>
+                            <div className="text-sm text-gray-500 dark:text-gray-400">
+                              Agregado
+                            </div>
                           </div>
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-200">
                         {formatCPF(motorista.cpf)}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-900 dark:text-white">
-                          {motorista.veiculo && motorista.veiculo.length > 0 ? (
-                            <div className="flex items-center gap-2">
-                              <Truck className="w-4 h-4 text-gray-400" />
-                              <span className="uppercase">{motorista.veiculo[0].placa}</span>
-                            </div>
-                          ) : (
-                            'Sem veículo'
-                          )}
-                        </div>
-                        <div className="text-sm text-gray-500 dark:text-gray-400">
-                          {motorista.veiculo && motorista.veiculo.length > 0 ? (
-                            `${motorista.veiculo[0].marca || ''} ${motorista.veiculo[0].tipo || ''}`.trim() || 'Não informado'
-                          ) : ''}
-                        </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm text-gray-900 dark:text-white">{motorista.cidade}</div>
@@ -1006,8 +963,26 @@ const AgregadosLista = () => {
                         )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
+                        {motorista.veiculo && motorista.veiculo.length > 0 ? (
+                          <div>
+                            <div className="text-sm font-medium text-gray-900 dark:text-white uppercase">
+                              {motorista.veiculo[0].placa}
+                            </div>
+                            <div className="text-sm text-gray-500 dark:text-gray-400">
+                              {motorista.veiculo[0].marca} {motorista.veiculo[0].tipo}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="text-sm text-gray-500 dark:text-gray-400">
+                            Sem veículo
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center gap-2">
-                          {renderPhoneLink(motorista)}
+                          <div className="text-sm text-gray-900 dark:text-white">
+                            {motorista.telefone ? formatPhone(motorista.telefone.toString()) : '-'}
+                          </div>
                           {motorista.telefone && (
                             <button 
                               onClick={() => handleStartChat(motorista)}
@@ -1030,9 +1005,9 @@ const AgregadosLista = () => {
                           <button 
                             onClick={() => handleViewAgregadoDetail(motorista)}
                             className="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 transition-colors"
-                            title="Ver Detalhes do Agregado - Visualize documentos, veículo e informações completas"
+                            title="Visualizar Detalhes - Veja informações do agregado e seu veículo"
                           >
-                            <FileText size={18} />
+                            <Truck size={18} />
                           </button>
                           
                           <button 
@@ -1046,7 +1021,7 @@ const AgregadosLista = () => {
                           <button 
                             onClick={() => handleEdit(motorista)}
                             className="text-yellow-500 hover:text-yellow-600 dark:text-yellow-400 dark:hover:text-yellow-300 transition-colors"
-                            title="Editar Dados do Agregado - Altere informações pessoais, contato, veículo e status"
+                            title="Editar Dados do Agregado - Altere informações pessoais, contato e status"
                           >
                             <Edit2 size={18} />
                           </button>
@@ -1157,8 +1132,8 @@ const AgregadosLista = () => {
           onClose={() => setContextMenu({ ...contextMenu, visible: false })}
           actions={[
             {
-              icon: <FileText size={16} />,
-              label: 'Ver Detalhes',
+              icon: <Truck size={16} />,
+              label: 'Visualizar Detalhes',
               onClick: () => handleViewAgregadoDetail(contextMenu.motorista!),
               color: 'text-blue-600 dark:text-blue-400'
             },

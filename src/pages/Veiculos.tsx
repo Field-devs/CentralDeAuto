@@ -7,10 +7,11 @@ import VeiculosInfinito from './veiculos/VeiculosInfinito';
 import { useCallback } from 'react';
 import { useCompanyData } from '../hooks/useCompanyData';
 import { useAuth } from '../context/AuthContext';
+import { supabase } from '../lib/supabase';
 
 const Veiculos = () => {
   const location = useLocation();
-  const { query } = useCompanyData();
+  const { companyId } = useCompanyData();
   const { accountId } = useAuth();
   const [missingDataCount, setMissingDataCount] = useState(0);
   const tabsContainerRef = useRef<HTMLDivElement>(null);
@@ -52,13 +53,22 @@ const Veiculos = () => {
 
   const fetchMissingDataCount = useCallback(async () => {
     try {
-      if (!accountId) return;
+      if (!accountId || !companyId) {
+        setMissingDataCount(0);
+        return;
+      }
       
-      const { data, error } = await query('veiculo')
+      const query = supabase
+        .from('veiculo')
         .select('veiculo_id')
-        .is('motorista_id', null)
         .eq('status_veiculo', true)
-        .or('tipologia.is.null,peso.is.null,cubagem.is.null');
+        .is('motorista_id', null)
+        .eq('company_id', companyId);
+
+      // Add the missing data conditions
+      query.or('tipologia.is.null,peso.is.null,cubagem.is.null');
+
+      const { data, error } = await query;
 
       if (error) throw error;
       setMissingDataCount(data?.length || 0);
@@ -66,7 +76,7 @@ const Veiculos = () => {
       console.error('Error fetching missing data count:', error);
       setMissingDataCount(0);
     }
-  }, [query, accountId]);
+  }, [accountId, companyId]);
 
   const tabs = [
     { path: '/veiculos/agregados', icon: Truck, label: 'Veículos de Agregados' },

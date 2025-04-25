@@ -177,7 +177,7 @@ const Contratados = () => {
 
   const fetchClientes = async () => {
     try {
-      const { data, error } = await query('cliente')
+      const { data, error } = await supabase.from('cliente')
         .select('*')
         .eq('st_cliente', true)
         .order('nome');
@@ -705,7 +705,7 @@ const Contratados = () => {
                           }}
                           onClick={(e) => e.stopPropagation()}
                           className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${
-                            motorista.cliente_id ? 
+                            motorista.cliente_id ?
                               clientColors[motorista.cliente_id % clientColors.length] :
                               'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200'
                           }`}

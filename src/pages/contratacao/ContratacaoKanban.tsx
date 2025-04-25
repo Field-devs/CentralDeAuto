@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, ReactNode } from 'react';
 import { MapPin, Phone, Mail, Calendar, Filter, X, FileText, Truck, User, MessageCircle, ChevronLeft, ChevronRight, Search } from 'lucide-react';
 import { useCompanyData } from '../../hooks/useCompanyData';
 import type { Motorista, DocumentoMotorista, Veiculo } from '../../types/database';
@@ -6,6 +6,7 @@ import DocumentViewer from '../../components/DocumentViewer';
 import toast from 'react-hot-toast';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import { useFloatingChat } from '../../hooks/useFloatingChat';
+import { supabase } from '../../lib/supabase';
 
 interface MotoristaWithDetails extends Motorista {
   veiculo?: Veiculo[];
@@ -164,7 +165,8 @@ const ContratacaoKanban = () => {
   const fetchColumnCount = async (status: string) => {
     try {
       // Get all motoristas with this status
-      const { data, error } = await query('motorista')
+      const { data, error } = await supabase
+        .from('motorista')
         .select('motorista_id')
         .eq('st_cadastro', status);
 
@@ -181,7 +183,8 @@ const ContratacaoKanban = () => {
       // Apply search filter if provided
       if (searchTerm) {
         // We need to get the full data to search by name or CPF
-        const { data: fullData } = await query('motorista')
+        const { data: fullData } = await supabase
+          .from('motorista')
           .select('motorista_id, nome, cpf')
           .eq('st_cadastro', status);
           
@@ -235,45 +238,46 @@ const ContratacaoKanban = () => {
       const to = from + itemsPerPage - 1;
       
       // Build the query with filters
-      let baseQuery = query('motorista').select(`
-        motorista_id,
-        nome,
-        funcao,
-        st_cadastro,
-        telefone,
-        email,
-        data_cadastro,
-        cpf
-      `);
-      
-      // Apply status filter
-      baseQuery = baseQuery.eq('st_cadastro', status);
+      let query = supabase
+        .from('motorista')
+        .select(`
+          motorista_id,
+          nome,
+          funcao,
+          st_cadastro,
+          telefone,
+          email,
+          data_cadastro,
+          cpf
+        `)
+        .eq('st_cadastro', status);
       
       // Apply function filter if not 'todos'
       if (funcaoFilter !== 'todos') {
-        baseQuery = baseQuery.eq('funcao', funcaoFilter);
+        query = query.eq('funcao', funcaoFilter);
       }
       
       // Apply search filter if provided
       if (searchTerm) {
-        baseQuery = baseQuery.or(`nome.ilike.%${searchTerm}%,cpf.ilike.%${searchTerm}%`);
+        query = query.or(`nome.ilike.%${searchTerm}%,cpf.ilike.%${searchTerm}%`);
       }
       
       // Apply sorting by data_cadastro (newest first)
-      baseQuery = baseQuery.order('data_cadastro', { ascending: false });
+      query = query.order('data_cadastro', { ascending: false });
       
       // Apply pagination
-      baseQuery = baseQuery.range(from, to);
+      query = query.range(from, to);
       
       // Execute the query
-      const { data: motoristasData, error } = await baseQuery;
+      const { data: motoristasData, error } = await query;
       
       if (error) throw error;
       
       // Fetch vehicle data for each motorista
       const motoristasWithVehicles = await Promise.all(
         (motoristasData || []).map(async (motorista) => {
-          const { data: veiculoData } = await query('veiculo')
+          const { data: veiculoData } = await supabase
+            .from('veiculo')
             .select('placa, tipologia')
             .eq('motorista_id', motorista.motorista_id)
             .limit(1)
@@ -363,11 +367,13 @@ const ContratacaoKanban = () => {
 
       // Fetch additional details only when viewing documents
       const [documentoResponse, enderecoResponse, veiculoResponse] = await Promise.all([
-        query('documento_motorista')
+        supabase
+          .from('documento_motorista')
           .select('*')
           .eq('motorista_id', motorista.motorista_id)
           .maybeSingle(),
-        query('end_motorista')
+        supabase
+          .from('end_motorista')
           .select(`
             nr_end,
             ds_complemento_end,
@@ -388,7 +394,8 @@ const ContratacaoKanban = () => {
           `)
           .eq('id_motorista', motorista.motorista_id)
           .maybeSingle(),
-        query('veiculo')
+        supabase
+          .from('veiculo')
           .select(`
             *,
             documento_veiculo (*)
@@ -416,7 +423,8 @@ const ContratacaoKanban = () => {
 
   const updateStatus = async (motorista_id: number, newStatus: string, oldStatus: string) => {
     try {
-      const { error } = await query('motorista')
+      const { error } = await supabase
+        .from('motorista')
         .update({ st_cadastro: newStatus })
         .eq('motorista_id', motorista_id);
 
